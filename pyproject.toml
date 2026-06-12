@@ -33,6 +33,8 @@ include = ["app*"]
 [tool.ruff]
 target-version = "py312"
 line-length = 100
+# Alembic 생성물(env.py·마이그레이션)은 보일러플레이트라 린트/포맷 제외
+extend-exclude = ["alembic"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

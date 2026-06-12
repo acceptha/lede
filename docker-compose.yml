@@ -9,7 +9,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lede}
       POSTGRES_DB: ${POSTGRES_DB:-lede}
     ports:
-      - "5432:5432"
+      # host 5432는 native PostgreSQL이 점유할 수 있어 5433으로 공개.
+      # 컨테이너 내부(app/worker)는 그대로 postgres:5432로 접속한다.
+      - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
