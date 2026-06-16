@@ -3,6 +3,7 @@
 API와 동일하게 async로 통일 (DESIGN §2). 잡:
 - ping: Redis 왕복 확인용 최소 잡
 - collect_feeds: 등록된 RSS 소스를 순회 수집 → contents 저장 (content_hash 중복 차단)
+- summarize_pending: 미요약 콘텐츠를 LLM provider로 요약 → summaries 캐싱 저장
 """
 
 import httpx
@@ -16,7 +17,11 @@ from app.collect.service import collect_source
 from app.config import get_settings
 from app.db.base import SessionFactory
 from app.db.models import Source
-from app.retry import deterministic_backoff
+from app.llm.factory import get_provider
+from app.llm.provider import LLMError, LLMProvider, LLMRateLimitError
+from app.retry import deterministic_backoff, full_jitter
+from app.summarize.repository import SummaryRepository
+from app.summarize.service import summarize_content
 
 settings = get_settings()
 
@@ -70,8 +75,51 @@ async def collect_feeds(ctx: dict) -> dict:
     return summary
 
 
+async def summarize_pending(ctx: dict) -> dict:
+    """아직 요약 없는 콘텐츠를 요약해 저장한다.
+
+    캐싱(절대규칙 2): 이미 요약된 글은 조회 단계에서 제외 → 재요약 0회.
+    실패 격리(절대규칙 5): 한 콘텐츠 요약 실패는 dead-letter로 세고 다음으로 진행.
+    rate limit(429): 공유 한도 → full jitter로 잡 전체를 백오프(재시도) (DESIGN §5).
+    """
+    job_try: int = ctx.get("job_try", 1)
+    provider: LLMProvider = ctx["llm_provider"]
+    summary = {"summarized": 0, "cached_skipped": 0, "failed": 0}
+
+    async with SessionFactory() as session:
+        repo = SummaryRepository(session)
+        for content in await repo.select_pending_contents():
+            try:
+                data = await summarize_content(
+                    title=content.title,
+                    body=content.content,
+                    provider=provider,
+                    chars_per_min=settings.chars_per_min,
+                )
+            except LLMRateLimitError:
+                await session.commit()  # 진행분 보존 후 잡 단위 백오프
+                if job_try < MAX_TRIES:
+                    raise Retry(defer=full_jitter(job_try)) from None
+                raise
+            except LLMError:
+                summary["failed"] += 1  # dead-letter: 격리하고 계속
+                continue
+
+            inserted = await repo.add_if_absent(
+                content_id=content.id,
+                summary=data.summary,
+                keywords=data.keywords,
+                reading_time=data.reading_time,
+            )
+            summary["summarized" if inserted else "cached_skipped"] += 1
+        await session.commit()
+
+    return summary
+
+
 async def startup(ctx: dict) -> None:
     ctx["settings"] = settings
+    ctx["llm_provider"] = get_provider(settings)
     ctx["http_client"] = httpx.AsyncClient(
         timeout=DEFAULT_TIMEOUT,
         follow_redirects=True,
@@ -88,7 +136,7 @@ async def shutdown(ctx: dict) -> None:
 class WorkerSettings:
     """`arq app.worker.WorkerSettings` 로 기동."""
 
-    functions = [ping, collect_feeds]
+    functions = [ping, collect_feeds, summarize_pending]
     on_startup = startup
     on_shutdown = shutdown
     max_tries = MAX_TRIES

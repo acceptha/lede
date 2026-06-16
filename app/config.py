@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://lede:lede@postgres:5432/lede"
     redis_url: RedisDsn = "redis://redis:6379/0"
 
+    # LLM — 공급자는 측정 후 결정(DESIGN §11), MVP 기본은 가짜 provider
+    llm_provider: str = "fake"
+    chars_per_min: int = 500  # 읽기 시간 계산용 분당 글자수 (절대규칙 3)
+
 
 @lru_cache
 def get_settings() -> Settings:
