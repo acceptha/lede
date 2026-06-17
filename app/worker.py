@@ -4,7 +4,10 @@ API와 동일하게 async로 통일 (DESIGN §2). 잡:
 - ping: Redis 왕복 확인용 최소 잡
 - collect_feeds: 등록된 RSS 소스를 순회 수집 → contents 저장 (content_hash 중복 차단)
 - summarize_pending: 미요약 콘텐츠를 LLM provider로 요약 → summaries 캐싱 저장
+- build_and_send_digest: 미수록 요약을 묶어 다이제스트 생성 → 이메일 발송 (중복 발송 차단)
 """
+
+from datetime import UTC, date, datetime
 
 import httpx
 from arq import Retry
@@ -16,7 +19,11 @@ from app.collect.rss import DEFAULT_TIMEOUT, fetch_feed
 from app.collect.service import collect_source
 from app.config import get_settings
 from app.db.base import SessionFactory
-from app.db.models import Source
+from app.db.models import Source, User
+from app.digest.repository import DigestRepository
+from app.digest.service import render_email
+from app.email.factory import get_email_sender
+from app.email.sender import EmailError, EmailSender
 from app.llm.factory import get_provider
 from app.llm.provider import LLMError, LLMProvider, LLMRateLimitError
 from app.retry import deterministic_backoff, full_jitter
@@ -117,9 +124,58 @@ async def summarize_pending(ctx: dict) -> dict:
     return summary
 
 
+async def build_and_send_digest(ctx: dict) -> dict:
+    """미수록 요약을 묶어 다이제스트를 만들고 seed 유저에게 발송한다.
+
+    선정: 그날 요약 전부(미수록), DIGEST_MAX_ITEMS>0이면 최신 N건으로 축소.
+    스킵: 선정 0건이면 다이제스트를 만들지 않는다 (DESIGN §5 적용 정책).
+    idempotency(절대규칙 2): (user_id, digest_date) UNIQUE + status pending→sent로
+      재실행해도 재발송 0회. 발송 실패는 결정론적 백오프로 재시도 (SES, DESIGN §5).
+    """
+    job_try: int = ctx.get("job_try", 1)
+    sender: EmailSender = ctx["email_sender"]
+    digest_date = date.today()
+
+    async with SessionFactory() as session:
+        user = await session.scalar(select(User).where(User.email == settings.seed_user_email))
+        if user is None:
+            return {"status": "no_seed_user"}
+
+        repo = DigestRepository(session)
+        digest = await repo.get_by_date(user_id=user.id, digest_date=digest_date)
+        if digest is None:
+            items = await repo.select_undigested(limit=settings.digest_max_items)
+            if not items:
+                return {"status": "skipped_no_items"}
+            digest = await repo.create(user_id=user.id, digest_date=digest_date)
+            await repo.add_items(
+                digest_id=digest.id,
+                selections=[(content.id, 0.0) for content, _ in items],
+            )
+
+        if digest.status == "sent":
+            await session.commit()
+            return {"status": "already_sent", "digest_id": digest.id}
+
+        views = await repo.load_item_views(digest_id=digest.id)
+        subject, text, html = render_email(digest_date=digest_date, items=views)
+        try:
+            await sender.send(to=user.email, subject=subject, text=text, html=html)
+        except EmailError:
+            await session.commit()  # 빌드분(다이제스트·항목) 보존 후 재시도
+            if job_try < MAX_TRIES:
+                raise Retry(defer=deterministic_backoff(job_try)) from None
+            raise
+
+        await repo.mark_sent(digest_id=digest.id, sent_at=datetime.now(UTC))
+        await session.commit()
+        return {"status": "sent", "digest_id": digest.id, "items": len(views)}
+
+
 async def startup(ctx: dict) -> None:
     ctx["settings"] = settings
     ctx["llm_provider"] = get_provider(settings)
+    ctx["email_sender"] = get_email_sender(settings)
     ctx["http_client"] = httpx.AsyncClient(
         timeout=DEFAULT_TIMEOUT,
         follow_redirects=True,
@@ -136,7 +192,7 @@ async def shutdown(ctx: dict) -> None:
 class WorkerSettings:
     """`arq app.worker.WorkerSettings` 로 기동."""
 
-    functions = [ping, collect_feeds, summarize_pending]
+    functions = [ping, collect_feeds, summarize_pending, build_and_send_digest]
     on_startup = startup
     on_shutdown = shutdown
     max_tries = MAX_TRIES

@@ -13,8 +13,9 @@ import asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.db.base import SessionFactory
-from app.db.models import Source
+from app.db.models import Source, User
 
 SEED_SOURCES: list[dict[str, str]] = [
     {
@@ -39,10 +40,22 @@ async def ensure_seed_sources(session: AsyncSession) -> int:
     return added
 
 
+async def ensure_seed_user(session: AsyncSession) -> bool:
+    """0단계 단일 유저(내 메일)를 email 기준으로 idempotent하게 보장. 새로 추가 시 True."""
+    email = get_settings().seed_user_email
+    existing = await session.scalar(select(User).where(User.email == email))
+    if existing is not None:
+        return False
+    session.add(User(email=email, nickname="seed"))
+    await session.commit()
+    return True
+
+
 async def _main() -> None:
     async with SessionFactory() as session:
-        added = await ensure_seed_sources(session)
-    print(f"seed sources ensured (newly added: {added})")
+        added_sources = await ensure_seed_sources(session)
+        added_user = await ensure_seed_user(session)
+    print(f"seed ensured (sources added: {added_sources}, user added: {int(added_user)})")
 
 
 if __name__ == "__main__":

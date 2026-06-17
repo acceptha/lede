@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     llm_provider: str = "fake"
     chars_per_min: int = 500  # 읽기 시간 계산용 분당 글자수 (절대규칙 3)
 
+    # 이메일 / 다이제스트
+    email_provider: str = "fake"  # 실 SES는 추후 (DESIGN §8 샌드박스 게이트)
+    seed_user_email: str = "siha@ssrinc.co.kr"  # 0단계 "내 메일" 수신자
+    digest_max_items: int = 0  # 0 = 무제한, >0 = published_at 최신 N건으로 축소
+
 
 @lru_cache
 def get_settings() -> Settings:
