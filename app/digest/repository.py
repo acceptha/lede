@@ -10,26 +10,33 @@ from datetime import date, datetime
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Content, Digest, DigestItem, Summary
+from app.db.models import Content, Digest, DigestItem, Summary, UserInterest
 from app.digest.service import DigestItemView
+from app.scoring.service import Candidate
 
 
 class DigestRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def select_undigested(self, *, limit: int = 0) -> list[tuple[Content, Summary]]:
-        """요약 완료 + 미수록 콘텐츠, published_at 최신순. limit>0이면 상위 N건."""
+    async def get_interest_keywords(self, *, user_id: int) -> set[str]:
+        rows = await self._session.scalars(
+            select(UserInterest.keyword).where(UserInterest.user_id == user_id)
+        )
+        return set(rows)
+
+    async def select_scoring_candidates(self) -> list[Candidate]:
+        """요약 완료 + 아직 어떤 다이제스트에도 안 담긴 콘텐츠 (재발송 방지)."""
         already = select(DigestItem.content_id)
         stmt = (
-            select(Content, Summary)
+            select(Content.id, Summary.keywords, Content.published_at)
             .join(Summary, Summary.content_id == Content.id)
             .where(Content.id.not_in(already))
-            .order_by(Content.published_at.desc().nullslast())
         )
-        if limit > 0:
-            stmt = stmt.limit(limit)
-        return [(c, s) for c, s in (await self._session.execute(stmt)).all()]
+        rows = (await self._session.execute(stmt)).all()
+        return [
+            Candidate(content_id=cid, keywords=kw or [], published_at=pa) for cid, kw, pa in rows
+        ]
 
     async def get_by_date(self, *, user_id: int, digest_date: date) -> Digest | None:
         return await self._session.scalar(

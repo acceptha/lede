@@ -27,6 +27,7 @@ from app.email.sender import EmailError, EmailSender
 from app.llm.factory import get_provider
 from app.llm.provider import LLMError, LLMProvider, LLMRateLimitError
 from app.retry import deterministic_backoff, full_jitter
+from app.scoring.service import score_and_select
 from app.summarize.repository import SummaryRepository
 from app.summarize.service import summarize_content
 
@@ -127,8 +128,8 @@ async def summarize_pending(ctx: dict) -> dict:
 async def build_and_send_digest(ctx: dict) -> dict:
     """미수록 요약을 묶어 다이제스트를 만들고 seed 유저에게 발송한다.
 
-    선정: 그날 요약 전부(미수록), DIGEST_MAX_ITEMS>0이면 최신 N건으로 축소.
-    스킵: 선정 0건이면 다이제스트를 만들지 않는다 (DESIGN §5 적용 정책).
+    선정: 관심사와의 Jaccard 점수 상위 DIGEST_TOP_N건 (score>0, 동점은 최신순).
+    스킵: 매칭 0건(관심사 미등록 포함)이면 다이제스트를 만들지 않는다 (DESIGN §5 적용 정책).
     idempotency(절대규칙 2): (user_id, digest_date) UNIQUE + status pending→sent로
       재실행해도 재발송 0회. 발송 실패는 결정론적 백오프로 재시도 (SES, DESIGN §5).
     """
@@ -144,13 +145,19 @@ async def build_and_send_digest(ctx: dict) -> dict:
         repo = DigestRepository(session)
         digest = await repo.get_by_date(user_id=user.id, digest_date=digest_date)
         if digest is None:
-            items = await repo.select_undigested(limit=settings.digest_max_items)
-            if not items:
+            interests = await repo.get_interest_keywords(user_id=user.id)
+            candidates = await repo.select_scoring_candidates()
+            selections = score_and_select(
+                candidates=candidates,
+                interests=interests,
+                top_n=settings.digest_top_n,
+            )
+            if not selections:
                 return {"status": "skipped_no_items"}
             digest = await repo.create(user_id=user.id, digest_date=digest_date)
             await repo.add_items(
                 digest_id=digest.id,
-                selections=[(content.id, 0.0) for content, _ in items],
+                selections=[(s.content_id, s.score) for s in selections],
             )
 
         if digest.status == "sent":

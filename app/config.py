@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     # 이메일 / 다이제스트
     email_provider: str = "fake"  # 실 SES는 추후 (DESIGN §8 샌드박스 게이트)
     seed_user_email: str = "siha@ssrinc.co.kr"  # 0단계 "내 메일" 수신자
-    digest_max_items: int = 0  # 0 = 무제한, >0 = published_at 최신 N건으로 축소
+    digest_top_n: int = 5  # 점수 상위 N건만 다이제스트에 담음 (DESIGN §5, score>0)
 
 
 @lru_cache
