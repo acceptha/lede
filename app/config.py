@@ -22,8 +22,13 @@ class Settings(BaseSettings):
     redis_url: RedisDsn = "redis://redis:6379/0"
 
     # LLM — 공급자는 측정 후 결정(DESIGN §11), MVP 기본은 가짜 provider
-    llm_provider: str = "fake"
+    llm_provider: str = "fake"  # "fake" | "anthropic" | "ollama"
+    anthropic_model: str = "claude-haiku-4-5"  # 저비용 모델로 시작 (절대규칙 3)
+    # Ollama(로컬, 무료). 컨테이너에서는 host.docker.internal로 host의 Ollama 접근
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model: str = "exaone3.5:2.4b"  # 한국어 특화 (LG EXAONE 3.5)
     chars_per_min: int = 500  # 읽기 시간 계산용 분당 글자수 (절대규칙 3)
+    # ANTHROPIC_API_KEY는 SDK가 env에서 직접 읽음 — Settings에 두지 않음(로깅 유출 방지)
 
     # 이메일 / 다이제스트
     email_provider: str = "fake"  # 실 SES는 추후 (DESIGN §8 샌드박스 게이트)

@@ -12,4 +12,13 @@ from app.llm.providers.fake import FakeProvider
 def get_provider(settings: Settings) -> LLMProvider:
     if settings.llm_provider == "fake":
         return FakeProvider()
-    raise ValueError(f"unknown llm_provider: {settings.llm_provider!r} (실 provider는 추후 추가)")
+    if settings.llm_provider == "anthropic":
+        # lazy import: fake 경로에서는 anthropic SDK를 로드하지 않음
+        from app.llm.providers.anthropic import AnthropicProvider
+
+        return AnthropicProvider(model=settings.anthropic_model)
+    if settings.llm_provider == "ollama":
+        from app.llm.providers.ollama import OllamaProvider
+
+        return OllamaProvider(base_url=settings.ollama_base_url, model=settings.ollama_model)
+    raise ValueError(f"unknown llm_provider: {settings.llm_provider!r}")
