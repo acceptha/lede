@@ -13,6 +13,7 @@ dependencies = [
     "alembic>=1.13",
     "feedparser>=6.0",
     "anthropic>=0.40",
+    "tzdata>=2024.1",
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
     "httpx>=0.27",

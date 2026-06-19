@@ -33,10 +33,12 @@ services:
   app:
     build: .
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    env_file:
+      - .env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://lede:lede@postgres:5432/lede}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      ENVIRONMENT: ${ENVIRONMENT:-local}
+      # 컨테이너 내부 기준 접속값 (env_file의 값보다 우선)
+      DATABASE_URL: postgresql+asyncpg://lede:lede@postgres:5432/lede
+      REDIS_URL: redis://redis:6379/0
     ports:
       - "8000:8000"
     depends_on:
@@ -47,11 +49,24 @@ services:
 
   worker:
     build: .
-    command: arq app.worker.WorkerSettings
+    # 부트스트랩(마이그레이션+seed) → 스케줄러(별도 프로세스, 백그라운드) → arq(포그라운드)
+    command:
+      - sh
+      - -c
+      - |
+        alembic upgrade head &&
+        python -m app.seed &&
+        (python -m app.scheduler &) &&
+        exec arq app.worker.WorkerSettings
+    env_file:
+      - .env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://lede:lede@postgres:5432/lede}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      ENVIRONMENT: ${ENVIRONMENT:-local}
+      DATABASE_URL: postgresql+asyncpg://lede:lede@postgres:5432/lede
+      REDIS_URL: redis://redis:6379/0
+      # 컨테이너에서 host의 Ollama 접근 (host의 localhost:11434)
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy

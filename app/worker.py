@@ -179,6 +179,18 @@ async def build_and_send_digest(ctx: dict) -> dict:
         return {"status": "sent", "digest_id": digest.id, "items": len(views)}
 
 
+async def run_pipeline(ctx: dict) -> dict:
+    """스케줄러가 매일 거는 오케스트레이터: 수집 → 요약 → 다이제스트 순차 실행.
+
+    세 단계 모두 멱등(content_hash·summaries·digests UNIQUE)이라 재실행/재시도 안전.
+    한 단계가 Retry를 올리면 잡 전체가 재시도되지만, 멱등성 덕에 중복이 생기지 않는다.
+    """
+    collected = await collect_feeds(ctx)
+    summarized = await summarize_pending(ctx)
+    digested = await build_and_send_digest(ctx)
+    return {"collect": collected, "summarize": summarized, "digest": digested}
+
+
 async def startup(ctx: dict) -> None:
     ctx["settings"] = settings
     ctx["llm_provider"] = get_provider(settings)
@@ -199,8 +211,17 @@ async def shutdown(ctx: dict) -> None:
 class WorkerSettings:
     """`arq app.worker.WorkerSettings` 로 기동."""
 
-    functions = [ping, collect_feeds, summarize_pending, build_and_send_digest]
+    functions = [
+        ping,
+        collect_feeds,
+        summarize_pending,
+        build_and_send_digest,
+        run_pipeline,
+    ]
     on_startup = startup
     on_shutdown = shutdown
     max_tries = MAX_TRIES
+    # run_pipeline은 미요약 콘텐츠를 배치로 요약 — 로컬 LLM(CPU)은 건당 수십 초라
+    # 기본 300s로는 부족. 콜드 로딩 + 다건 요약을 수용하도록 넉넉히 둠.
+    job_timeout = 1800
     redis_settings = RedisSettings.from_dsn(str(settings.redis_url))

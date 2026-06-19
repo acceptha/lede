@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     chars_per_min: int = 500  # 읽기 시간 계산용 분당 글자수 (절대규칙 3)
     # ANTHROPIC_API_KEY는 SDK가 env에서 직접 읽음 — Settings에 두지 않음(로깅 유출 방지)
 
+    # 스케줄러 — 매일 정해진 시각에 run_pipeline enqueue (DESIGN §2)
+    schedule_hour: int = 8
+    schedule_minute: int = 0
+    schedule_timezone: str = "Asia/Seoul"
+
     # 이메일 / 다이제스트
     email_provider: str = "fake"  # 실 SES는 추후 (DESIGN §8 샌드박스 게이트)
     seed_user_email: str = "siha@ssrinc.co.kr"  # 0단계 "내 메일" 수신자

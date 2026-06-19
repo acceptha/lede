@@ -62,6 +62,7 @@ class OllamaProvider:
             "model": self._model,
             "stream": False,
             "format": _FORMAT,
+            "keep_alive": "30m",  # 모델을 메모리에 유지 → 배치/반복 호출 시 콜드 로딩 회피
             "options": {"temperature": 0},
             "messages": [
                 {"role": "system", "content": _SYSTEM},
