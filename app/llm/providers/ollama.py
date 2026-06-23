@@ -82,12 +82,15 @@ class OllamaProvider:
         return _parse_response(data)
 
     def _log_usage(self, data: dict[str, Any]) -> None:
-        total_ms = (data.get("total_duration") or 0) // 1_000_000
         logger.info(
-            "llm_usage provider=ollama model=%s prompt_tokens=%s eval_tokens=%s "
-            "total_ms=%s cost_usd=0(local)",
-            self._model,
-            data.get("prompt_eval_count"),
-            data.get("eval_count"),
-            total_ms,
+            "llm_usage",
+            extra={
+                "event": "llm_usage",
+                "provider": "ollama",
+                "model": self._model,
+                "prompt_tokens": data.get("prompt_eval_count"),
+                "eval_tokens": data.get("eval_count"),
+                "total_ms": (data.get("total_duration") or 0) // 1_000_000,
+                "cost_usd": 0,  # 로컬 실행
+            },
         )

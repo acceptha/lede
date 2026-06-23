@@ -26,6 +26,7 @@ from app.email.factory import get_email_sender
 from app.email.sender import EmailError, EmailSender
 from app.llm.factory import get_provider
 from app.llm.provider import LLMError, LLMProvider, LLMRateLimitError
+from app.logging_config import setup_logging
 from app.retry import deterministic_backoff, full_jitter
 from app.scoring.service import score_and_select
 from app.summarize.repository import SummaryRepository
@@ -192,6 +193,7 @@ async def run_pipeline(ctx: dict) -> dict:
 
 
 async def startup(ctx: dict) -> None:
+    setup_logging()
     ctx["settings"] = settings
     ctx["llm_provider"] = get_provider(settings)
     ctx["email_sender"] = get_email_sender(settings)

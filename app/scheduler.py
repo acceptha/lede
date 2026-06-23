@@ -13,11 +13,13 @@ from arq import create_pool
 from arq.connections import RedisSettings
 
 from app.config import get_settings
+from app.logging_config import setup_logging
 
 logger = logging.getLogger("lede.scheduler")
 
 
 async def main() -> None:
+    setup_logging()
     settings = get_settings()
     redis = await create_pool(RedisSettings.from_dsn(str(settings.redis_url)))
 
@@ -46,5 +48,4 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
     asyncio.run(main())

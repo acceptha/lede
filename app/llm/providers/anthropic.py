@@ -108,10 +108,14 @@ class AnthropicProvider:
             + usage.output_tokens * _PRICE_OUTPUT
         ) / 1_000_000
         logger.info(
-            "llm_usage model=%s input=%d cache_read=%d output=%d cost_usd=%.6f",
-            self._model,
-            usage.input_tokens,
-            cache_read,
-            usage.output_tokens,
-            cost,
+            "llm_usage",
+            extra={
+                "event": "llm_usage",
+                "provider": "anthropic",
+                "model": self._model,
+                "input_tokens": usage.input_tokens,
+                "cache_read": cache_read,
+                "output_tokens": usage.output_tokens,
+                "cost_usd": round(cost, 6),
+            },
         )
