@@ -15,12 +15,17 @@ class SummaryRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def select_pending_contents(self) -> list[Content]:
+    async def select_pending_contents(
+        self, *, exclude_ids: set[int] | None = None
+    ) -> list[Content]:
         stmt = (
             select(Content)
             .outerjoin(Summary, Summary.content_id == Content.id)
             .where(Summary.id.is_(None))
         )
+        if exclude_ids:
+            # dead-letter로 park된 콘텐츠는 재시도에서 제외
+            stmt = stmt.where(Content.id.not_in(exclude_ids))
         return list((await self._session.execute(stmt)).scalars().all())
 
     async def add_if_absent(

@@ -128,3 +128,22 @@ class DigestItem(Base):
     score: Mapped[float] = mapped_column()
 
     digest: Mapped[Digest] = relationship(back_populates="items")
+
+
+class DeadLetter(Base):
+    """N회 실패한 작업 기록 (DESIGN §5 dead-letter). 대상당 1행, attempts 누적.
+
+    attempts >= 임계값이면 select_pending에서 제외(park) → 무한 재시도 방지.
+    content_id는 콘텐츠 단위 실패용(요약). job 단위 실패는 NULL 가능.
+    """
+
+    __tablename__ = "dead_letters"
+    __table_args__ = (UniqueConstraint("job_type", "content_id", name="uq_deadletter_job_content"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    job_type: Mapped[str] = mapped_column(String(50), index=True)
+    content_id: Mapped[int | None] = mapped_column(ForeignKey("contents.id", ondelete="CASCADE"))
+    error: Mapped[str] = mapped_column(Text)
+    attempts: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

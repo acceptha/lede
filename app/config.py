@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     schedule_minute: int = 0
     schedule_timezone: str = "Asia/Seoul"
 
+    # dead-letter — 요약 실패가 이 횟수 이상이면 park(재시도 제외) (DESIGN §5)
+    deadletter_max_attempts: int = 3
+
     # 이메일 / 다이제스트
     email_provider: str = "fake"  # 실 SES는 추후 (DESIGN §8 샌드박스 게이트)
     seed_user_email: str = "siha@ssrinc.co.kr"  # 0단계 "내 메일" 수신자

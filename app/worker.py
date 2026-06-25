@@ -20,6 +20,7 @@ from app.collect.service import collect_source
 from app.config import get_settings
 from app.db.base import SessionFactory
 from app.db.models import Source, User
+from app.deadletter.repository import SqlDeadLetterRepository
 from app.digest.repository import DigestRepository
 from app.digest.service import render_email
 from app.email.factory import get_email_sender
@@ -97,7 +98,12 @@ async def summarize_pending(ctx: dict) -> dict:
 
     async with SessionFactory() as session:
         repo = SummaryRepository(session)
-        for content in await repo.select_pending_contents():
+        dead_letters = SqlDeadLetterRepository(session)
+        # N회 이상 실패한 콘텐츠는 제외(park) → 무한 재시도 방지
+        parked = await dead_letters.parked_content_ids(
+            job_type="summarize", max_attempts=settings.deadletter_max_attempts
+        )
+        for content in await repo.select_pending_contents(exclude_ids=parked):
             try:
                 data = await summarize_content(
                     title=content.title,
@@ -110,8 +116,12 @@ async def summarize_pending(ctx: dict) -> dict:
                 if job_try < MAX_TRIES:
                     raise Retry(defer=full_jitter(job_try)) from None
                 raise
-            except LLMError:
-                summary["failed"] += 1  # dead-letter: 격리하고 계속
+            except LLMError as exc:
+                # dead-letter 기록(attempts++) 후 격리하고 계속 (절대규칙 5)
+                await dead_letters.record(
+                    job_type="summarize", content_id=content.id, error=str(exc)
+                )
+                summary["failed"] += 1
                 continue
 
             inserted = await repo.add_if_absent(

@@ -7,6 +7,7 @@ API는 가벼운 CRUD(관심사 등록·조회)와 헬스 체크를 담당.
 from fastapi import FastAPI
 
 from app.config import get_settings
+from app.deadletter.router import router as deadletter_router
 from app.interests.router import router as interests_router
 from app.logging_config import setup_logging
 
@@ -19,6 +20,7 @@ app = FastAPI(
 )
 
 app.include_router(interests_router)
+app.include_router(deadletter_router)
 
 
 @app.get("/health")
