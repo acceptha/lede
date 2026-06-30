@@ -1,5 +1,7 @@
 # lede — AI Newsletter Curator
 
+[![CI](https://github.com/acceptha/lede/actions/workflows/ci.yml/badge.svg)](https://github.com/acceptha/lede/actions/workflows/ci.yml)
+
 > RSS 수집 → LLM 요약 → 관심사 점수 필터 → 일일 다이제스트 이메일을 자동화하는 **비동기 배치 파이프라인**.
 > *Collects RSS, summarizes with an LLM, scores against your interests, and emails a daily digest.*
 
