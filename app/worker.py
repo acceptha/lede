@@ -15,7 +15,7 @@ from arq.connections import RedisSettings
 from sqlalchemy import select
 
 from app.collect.repository import SqlContentSink
-from app.collect.rss import DEFAULT_TIMEOUT, fetch_feed
+from app.collect.rss import DEFAULT_TIMEOUT, USER_AGENT, fetch_feed
 from app.collect.service import collect_source
 from app.config import get_settings
 from app.db.base import SessionFactory
@@ -210,7 +210,7 @@ async def startup(ctx: dict) -> None:
     ctx["http_client"] = httpx.AsyncClient(
         timeout=DEFAULT_TIMEOUT,
         follow_redirects=True,
-        headers={"User-Agent": "lede/0.0 (+https://github.com/acceptha/lede)"},
+        headers={"User-Agent": USER_AGENT},
     )
 
 

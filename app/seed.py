@@ -1,10 +1,7 @@
 """seed 소스 등록 — 본문 전문(full-text) RSS를 주는 소스만.
 
-검증(2026-06, 후보 5곳):
-- 어피티(uppity.co.kr/feed): RSS 2.0 + content:encoded 본문 전문 → 채택.
-- 너겟(nugget.im/rss): RSS는 있으나 본문 전부 빈 description(imweb 헤드라인형) → 보류.
-- 캐릿·순살·뉴닉: 표준 피드 경로 전부 404, 공개 RSS 없음 → 보류.
-보류 사유·상세는 DESIGN §11 참조. 본문 보강은 크롤링이 필요해 스코프 밖(§3-6).
+채택 기준: 요약 파이프라인은 본문 전문이 있어야 의미가 있으므로, content:encoded 등
+실제 본문이 담긴 피드만 등록한다. 보류/제외 사유는 DESIGN §11 소스 표 참조.
 실행: `python -m app.seed` (DATABASE_URL은 env로 주입).
 """
 
@@ -21,6 +18,16 @@ SEED_SOURCES: list[dict[str, str]] = [
     {
         "source_name": "어피티",
         "source_url": "https://uppity.co.kr/feed",
+        "source_type": "rss",
+    },
+    {
+        "source_name": "토스 기술블로그",
+        "source_url": "https://toss.tech/rss.xml",
+        "source_type": "rss",
+    },
+    {
+        "source_name": "네이버 D2",
+        "source_url": "https://d2.naver.com/d2.atom",
         "source_type": "rss",
     },
 ]

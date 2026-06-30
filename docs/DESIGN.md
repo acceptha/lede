@@ -276,14 +276,18 @@ IR 교과서가 정확히 이 한계를 지적하며 tf-idf·코사인 유사도
 
 | 소스 | RSS | 본문 | 판정 | 비고 |
 |------|:---:|:----:|------|------|
-| **어피티** (uppity.co.kr/feed) | ✅ | ✅ 전문 | **채택 (seed)** | RSS 2.0 + `content:encoded` 본문 전문 |
-| 너겟 (nugget.im/rss) | ✅ | ❌ 없음 | 보류 | imweb 헤드라인형 — 50항목 전부 `<description>` 빈 태그, `content:encoded` 0건. 제목·링크만 |
-| 캐릿 (careet.net) | ❌ | — | 보류 | 표준 피드 경로(`/rss`·`/feed`·`/rss.xml`·`/atom.xml`·`/feed/`) 전부 404 |
+| **어피티** (uppity.co.kr/feed) | ✅ | ✅ 전문 | **채택 (seed)** | RSS 2.0 + `content:encoded` 본문 전문 (경제) |
+| **토스** (toss.tech/rss.xml) | ✅ | ✅ 전문 | **채택 (seed, B3)** | `content:encoded` ~8500자 (기술). 브라우저형 UA 필요 |
+| **네이버 D2** (d2.naver.com/d2.atom) | ✅ | ✅ 전문 | **채택 (seed, B3)** | Atom, 본문 포함 (기술) |
+| 우아한형제들 (techblog.woowahan.com/feed/) | ✅ | ✅ 전문 | 보류 | full-text지만 **Cloudflare JS 챌린지**로 HTTP 차단(403) → 헤드리스 우회는 스코프 밖 |
+| 카카오 (tech.kakao.com/feed/) | ✅ | ❌ 발췌 | 보류 | `description` ~280자, `content:encoded` 없음 — 발췌만 |
+| 너겟 (nugget.im/rss) | ✅ | ❌ 없음 | 보류 | imweb 헤드라인형 — 전 항목 `<description>` 빈 태그 |
+| 캐릿 (careet.net) | ❌ | — | 보류 | 표준 피드 경로 전부 404 |
 | 순살브리핑 (soonsal.com) | ❌ | — | 보류 | 동일 — 공개 RSS 없음 |
 | 뉴닉 (newneek.co) | ❌ | — | 보류 | 동일 — 공개 RSS 없음 |
 
-**기준:** 요약 파이프라인은 **본문 전문**이 있어야 의미가 있다. RSS가 있어도 본문이 없으면(너겟) 채택하지 않는다.
-보류 4곳의 본문 보강은 각 글 웹페이지 크롤링이 필요 → **스코프 밖**(§3-6 RSS만, 크롤링 금지). 멀티소스 확장은 본문 전문 RSS를 주는 소스를 우선 추가한다.
+**기준:** 요약 파이프라인은 **본문 전문**이 있어야 의미가 있다. RSS가 있어도 본문이 없거나(너겟) 발췌만(카카오) 있으면 채택하지 않는다.
+경제 뉴스레터는 대부분 full-text RSS 미제공 → 멀티소스는 본문 전문이 안정적인 기술 블로그(우아한형제들·토스)로 확장. 보류 소스의 본문 보강은 크롤링이 필요 → **스코프 밖**(§3-6 RSS만, 크롤링 금지).
 
 ---
 

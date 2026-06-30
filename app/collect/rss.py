@@ -14,6 +14,12 @@ from pydantic import BaseModel
 # RSS 호출 타임아웃(초). RSS 경로는 결정론적 백오프로 재시도 (DESIGN §5).
 DEFAULT_TIMEOUT = 15.0
 
+# 일부 피드(토스 등)는 비표준 UA를 차단 → 브라우저형 UA로 공개 RSS를 정상 수신.
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
+
 
 class RawEntry(BaseModel):
     """피드에서 추출한 한 건의 원문 (DB 저장 전 단계)."""
