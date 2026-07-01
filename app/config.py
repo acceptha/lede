@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     # Ollama(로컬, 무료). 컨테이너에서는 host.docker.internal로 host의 Ollama 접근
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "exaone3.5:2.4b"  # 한국어 특화 (LG EXAONE 3.5)
+    # 임베딩(V3 벡터 방향) — 기본 fake, ollama 시 bge-m3(다국어)
+    embedding_provider: str = "fake"  # "fake" | "ollama"
+    ollama_embed_model: str = "bge-m3"
     chars_per_min: int = 500  # 읽기 시간 계산용 분당 글자수 (절대규칙 3)
     # ANTHROPIC_API_KEY는 SDK가 env에서 직접 읽음 — Settings에 두지 않음(로깅 유출 방지)
 
