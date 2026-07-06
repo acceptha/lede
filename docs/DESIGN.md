@@ -261,7 +261,7 @@ IR 교과서가 정확히 이 한계를 지적하며 tf-idf·코사인 유사도
 | 버전 | 내용 |
 |------|------|
 | V2 | 가입/로그인/JWT 인증, 멀티유저, Slack/Discord/Telegram 연동, SES 프로덕션 |
-| V3 | 벡터 검색, 유사 콘텐츠 추천 |
+| V3 (일부 구현) | **임베딩 provider(ollama bge-m3) + pgvector 저장 + 점수 전략 스위치(jaccard↔embedding) 완료.** 유사 콘텐츠 추천·재랭킹·코사인 threshold 튜닝(관찰 트리거)은 확장 여지 |
 | V4 | `user_events` 기반 개인화 추천 엔진, AI 에이전트 큐레이션 |
 | V5 | SaaS 공개, 유료 구독 모델 검토 |
 

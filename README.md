@@ -41,11 +41,13 @@
   │  FastAPI App │  관심사 CRUD(/interests) · dead-letter 조회(/dead-letters) · /docs(Swagger=관리자 콘솔)
   └──────────────┘
 
-  공통: PostgreSQL(영속) · Redis(Arq 큐 + 캐시)
+  공통: PostgreSQL(+pgvector) · Redis(Arq 큐 + 캐시)
   LLM: provider 추상화 → fake | anthropic(Claude Haiku) | ollama(로컬, 무료)
+  임베딩: provider 추상화 → fake | ollama(bge-m3) → pgvector 저장
 ```
 
-데이터 흐름: **수집 → 요약 → 점수(추천) → 전달** 전 과정 자동화.
+데이터 흐름: **수집 → 요약 → (임베딩) → 점수(추천) → 전달** 전 과정 자동화.
+점수 전략은 `SCORING_STRATEGY`로 **Jaccard(토큰 겹침) ↔ 임베딩 코사인(의미)** 교체.
 
 ---
 
@@ -141,13 +143,12 @@ Python 3.12 · FastAPI · Arq · APScheduler · PostgreSQL · Redis · SQLAlchem
 
 ## 스코프 / 로드맵
 
-**MVP(현재)**: RSS 수집 + content_hash 중복 제거 / LLM 요약(캐싱) / 관심사 등록 + Jaccard top-N / 일일 다이제스트(idempotent) / 실패 처리(재시도·dead-letter) / 스케줄 자동화 / 구조화 로깅.
+**구현 완료**: RSS **다중 소스**(어피티·토스·네이버 D2) + content_hash 중복 제거 / LLM 요약(캐싱) / 관심사 등록 + **점수 전략 스위치(Jaccard ↔ 임베딩 코사인)** / 일일 다이제스트(idempotent) / 실패 처리(재시도·dead-letter park) / 스케줄 자동화 / 구조화 JSON 로깅 / **임베딩 저장(pgvector) + embed_pending** / CI(단위+통합) + 통합 테스트.
 
 | 버전 | 계획 |
 |------|------|
-| 진행 중 | 본문 전문 RSS 다중 소스 확장 |
+| V3 (일부 구현) | 임베딩 provider + pgvector + 점수 전략 스위치 **완료** → 유사 콘텐츠 추천·재랭킹·threshold 튜닝은 확장 여지 |
 | V2 | 가입/로그인/JWT, 멀티유저, Slack/Discord 연동, SES 프로덕션 |
-| V3 | 벡터 검색·유사 콘텐츠 추천 (Jaccard → tf-idf/임베딩) |
 | V4 | `user_events` 기반 개인화 추천 |
 
 상세: [docs/DESIGN.md](docs/DESIGN.md) §10
