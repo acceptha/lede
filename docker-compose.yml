@@ -3,7 +3,7 @@
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16  # PG16 + pgvector 확장 (V3 벡터)
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-lede}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lede}

@@ -25,6 +25,9 @@ from app.digest.repository import DigestRepository
 from app.digest.service import render_email
 from app.email.factory import get_email_sender
 from app.email.sender import EmailError, EmailSender
+from app.embedding.factory import get_embedding_provider
+from app.embedding.provider import EmbeddingError, EmbeddingProvider
+from app.embedding.repository import EmbeddingRepository
 from app.llm.factory import get_provider
 from app.llm.provider import LLMError, LLMProvider, LLMRateLimitError
 from app.logging_config import setup_logging
@@ -37,6 +40,9 @@ settings = get_settings()
 
 # RSS 수집 잡 최대 시도 횟수. 초과 시 실패 소스는 결과 요약에만 남기고 종료.
 MAX_TRIES = 4
+
+# 임베딩 배치 크기 — 한 번에 이 개수씩 provider에 보냄
+EMBED_BATCH = 16
 
 
 async def ping(ctx: dict) -> str:
@@ -190,22 +196,55 @@ async def build_and_send_digest(ctx: dict) -> dict:
         return {"status": "sent", "digest_id": digest.id, "items": len(views)}
 
 
-async def run_pipeline(ctx: dict) -> dict:
-    """스케줄러가 매일 거는 오케스트레이터: 수집 → 요약 → 다이제스트 순차 실행.
+async def embed_pending(ctx: dict) -> dict:
+    """임베딩 없는 요약을 배치로 임베딩해 저장 (V3 벡터). 로컬이라 비용 0.
 
-    세 단계 모두 멱등(content_hash·summaries·digests UNIQUE)이라 재실행/재시도 안전.
-    한 단계가 Retry를 올리면 잡 전체가 재시도되지만, 멱등성 덕에 중복이 생기지 않는다.
+    실패한 배치는 건너뛰고(격리), embedding이 NULL로 남아 다음 실행에 재시도(자가 치유).
+    """
+    provider: EmbeddingProvider = ctx["embedding_provider"]
+    result = {"embedded": 0, "failed_batches": 0}
+
+    async with SessionFactory() as session:
+        repo = EmbeddingRepository(session)
+        rows = await repo.select_needs_embedding()
+        for start in range(0, len(rows), EMBED_BATCH):
+            batch = rows[start : start + EMBED_BATCH]
+            try:
+                vectors = await provider.embed([r.summary for r in batch])
+            except EmbeddingError:
+                result["failed_batches"] += 1
+                continue
+            for row, vector in zip(batch, vectors, strict=True):
+                await repo.set_embedding(summary_id=row.id, vector=vector)
+                result["embedded"] += 1
+        await session.commit()
+
+    return result
+
+
+async def run_pipeline(ctx: dict) -> dict:
+    """스케줄러가 매일 거는 오케스트레이터: 수집 → 요약 → 임베딩 → 다이제스트 순차 실행.
+
+    모든 단계가 멱등(content_hash·summaries·digests UNIQUE, embedding NULL 조회)이라
+    재실행/재시도 안전. 한 단계가 Retry를 올려도 멱등성 덕에 중복이 생기지 않는다.
     """
     collected = await collect_feeds(ctx)
     summarized = await summarize_pending(ctx)
+    embedded = await embed_pending(ctx)
     digested = await build_and_send_digest(ctx)
-    return {"collect": collected, "summarize": summarized, "digest": digested}
+    return {
+        "collect": collected,
+        "summarize": summarized,
+        "embed": embedded,
+        "digest": digested,
+    }
 
 
 async def startup(ctx: dict) -> None:
     setup_logging()
     ctx["settings"] = settings
     ctx["llm_provider"] = get_provider(settings)
+    ctx["embedding_provider"] = get_embedding_provider(settings)
     ctx["email_sender"] = get_email_sender(settings)
     ctx["http_client"] = httpx.AsyncClient(
         timeout=DEFAULT_TIMEOUT,
@@ -227,6 +266,7 @@ class WorkerSettings:
         ping,
         collect_feeds,
         summarize_pending,
+        embed_pending,
         build_and_send_digest,
         run_pipeline,
     ]

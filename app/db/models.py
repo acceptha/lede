@@ -7,6 +7,7 @@ idempotency의 실체인 두 제약을 처음부터 박는다 (CLAUDE.md 절대�
 
 from datetime import date, datetime
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
     Date,
@@ -22,6 +23,9 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+
+# 임베딩 차원 — bge-m3 기준 1024. 모델 변경 시 마이그레이션 필요.
+EMBEDDING_DIM = 1024
 
 
 class User(Base):
@@ -76,6 +80,8 @@ class Summary(Base):
     keywords: Mapped[list[str]] = mapped_column(JSONB, default=list)
     # 글자수 ÷ 분당 속도로 직접 계산 (LLM에 묻지 않음, 절대규칙 3). 단위: 분
     reading_time: Mapped[int | None] = mapped_column(Integer)
+    # 의미 임베딩 (V3 벡터 방향). NULL이면 embed_pending 대상. pgvector 코사인 거리로 검색
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
 
     content: Mapped[Content] = relationship(back_populates="summary")
 

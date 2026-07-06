@@ -31,6 +31,7 @@ def pytest_collection_modifyitems(config, items):
 async def db_session() -> AsyncSession:
     engine = create_async_engine(TEST_DATABASE_URL, future=True)
     async with engine.begin() as conn:
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))  # pgvector
         await conn.run_sync(Base.metadata.create_all)  # 멱등(checkfirst)
 
     maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
