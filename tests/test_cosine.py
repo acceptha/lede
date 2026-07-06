@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.scoring.cosine import cosine_similarity, rank_by_cosine
+from app.scoring.cosine import cosine_similarity, mean_vector, rank_by_cosine
 
 
 def test_identical_vectors_is_one():
@@ -24,6 +24,14 @@ def test_zero_vector_is_zero():
 def test_dimension_mismatch_raises():
     with pytest.raises(ValueError):
         cosine_similarity([1.0], [1.0, 2.0])
+
+
+def test_mean_vector_is_centroid():
+    assert mean_vector([[1.0, 0.0], [0.0, 2.0]]) == [0.5, 1.0]
+
+
+def test_mean_vector_empty():
+    assert mean_vector([]) == []
 
 
 def test_rank_orders_by_similarity_desc_and_top_n():

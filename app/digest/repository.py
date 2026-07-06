@@ -38,6 +38,17 @@ class DigestRepository:
             Candidate(content_id=cid, keywords=kw or [], published_at=pa) for cid, kw, pa in rows
         ]
 
+    async def select_embedded_candidates(self) -> list[tuple[int, list[float]]]:
+        """임베딩이 있고 아직 미수록인 콘텐츠 (content_id, embedding) — 코사인 전략용."""
+        already = select(DigestItem.content_id)
+        stmt = (
+            select(Summary.content_id, Summary.embedding)
+            .where(Summary.content_id.not_in(already))
+            .where(Summary.embedding.is_not(None))
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return [(cid, list(emb)) for cid, emb in rows]
+
     async def get_by_date(self, *, user_id: int, digest_date: date) -> Digest | None:
         return await self._session.scalar(
             select(Digest).where(Digest.user_id == user_id, Digest.digest_date == digest_date)

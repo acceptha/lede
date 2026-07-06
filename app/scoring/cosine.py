@@ -7,6 +7,15 @@ Jaccard는 정확 토큰 매칭이라 `AI`≠`인공지능`이면 0. 코사인�
 import math
 
 
+def mean_vector(vectors: list[list[float]]) -> list[float]:
+    """벡터들의 평균(centroid). 여러 관심사 키워드 임베딩을 하나의 관심 벡터로."""
+    if not vectors:
+        return []
+    n = len(vectors)
+    dim = len(vectors[0])
+    return [sum(v[i] for v in vectors) / n for i in range(dim)]
+
+
 def cosine_similarity(a: list[float], b: list[float]) -> float:
     if len(a) != len(b):
         raise ValueError(f"차원 불일치: {len(a)} vs {len(b)}")

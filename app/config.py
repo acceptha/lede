@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     email_provider: str = "fake"  # 실 SES는 추후 (DESIGN §8 샌드박스 게이트)
     seed_user_email: str = "siha@ssrinc.co.kr"  # 0단계 "내 메일" 수신자
     digest_top_n: int = 5  # 점수 상위 N건만 다이제스트에 담음 (DESIGN §5, score>0)
+    # 점수 전략 — jaccard(토큰 겹침) | embedding(관심사↔콘텐츠 임베딩 코사인, V3)
+    scoring_strategy: str = "jaccard"
 
 
 @lru_cache

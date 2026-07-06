@@ -32,6 +32,7 @@ from app.llm.factory import get_provider
 from app.llm.provider import LLMError, LLMProvider, LLMRateLimitError
 from app.logging_config import setup_logging
 from app.retry import deterministic_backoff, full_jitter
+from app.scoring.cosine import mean_vector, rank_by_cosine
 from app.scoring.service import score_and_select
 from app.summarize.repository import SummaryRepository
 from app.summarize.service import summarize_content
@@ -142,6 +143,32 @@ async def summarize_pending(ctx: dict) -> dict:
     return summary
 
 
+async def _select_digest_items(
+    repo: DigestRepository, user_id: int, ctx: dict
+) -> list[tuple[int, float]]:
+    """점수 전략에 따라 다이제스트에 담을 (content_id, score) 목록을 고른다.
+
+    jaccard: 관심사↔콘텐츠 키워드 겹침(top-N). embedding: 관심사 임베딩 centroid와
+    콘텐츠 임베딩의 코사인 유사도(top-N). 관심사 없으면 빈 목록(발송 스킵).
+    """
+    interests = await repo.get_interest_keywords(user_id=user_id)
+    if not interests:
+        return []
+
+    if settings.scoring_strategy == "embedding":
+        provider: EmbeddingProvider = ctx["embedding_provider"]
+        centroid = mean_vector(await provider.embed(sorted(interests)))
+        candidates = await repo.select_embedded_candidates()
+        return rank_by_cosine(centroid, candidates, top_n=settings.digest_top_n)
+
+    # 기본: Jaccard
+    candidates = await repo.select_scoring_candidates()
+    selections = score_and_select(
+        candidates=candidates, interests=interests, top_n=settings.digest_top_n
+    )
+    return [(s.content_id, s.score) for s in selections]
+
+
 async def build_and_send_digest(ctx: dict) -> dict:
     """미수록 요약을 묶어 다이제스트를 만들고 seed 유저에게 발송한다.
 
@@ -162,20 +189,11 @@ async def build_and_send_digest(ctx: dict) -> dict:
         repo = DigestRepository(session)
         digest = await repo.get_by_date(user_id=user.id, digest_date=digest_date)
         if digest is None:
-            interests = await repo.get_interest_keywords(user_id=user.id)
-            candidates = await repo.select_scoring_candidates()
-            selections = score_and_select(
-                candidates=candidates,
-                interests=interests,
-                top_n=settings.digest_top_n,
-            )
+            selections = await _select_digest_items(repo, user.id, ctx)  # [(content_id, score)]
             if not selections:
                 return {"status": "skipped_no_items"}
             digest = await repo.create(user_id=user.id, digest_date=digest_date)
-            await repo.add_items(
-                digest_id=digest.id,
-                selections=[(s.content_id, s.score) for s in selections],
-            )
+            await repo.add_items(digest_id=digest.id, selections=selections)
 
         if digest.status == "sent":
             await session.commit()

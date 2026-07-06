@@ -68,3 +68,18 @@ async def test_find_similar_orders_by_cosine_distance(db_session):
     ).scalar_one()
     assert near[0].content_id == a_content
     assert near[0].distance < near[1].distance  # 거리 오름차순(가까운 것 먼저)
+
+
+async def test_select_embedded_candidates_excludes_null(db_session):
+    from app.digest.repository import DigestRepository
+
+    sid_e = await _seed_summary(db_session, hash_="has_emb")
+    await _seed_summary(db_session, hash_="no_emb")  # 임베딩 없음
+    repo = EmbeddingRepository(db_session)
+    await repo.set_embedding(summary_id=sid_e, vector=_vec(1.0, 0.0))
+    await db_session.commit()
+
+    candidates = await DigestRepository(db_session).select_embedded_candidates()
+    # 임베딩 있는 콘텐츠만 후보 (NULL은 제외)
+    assert len(candidates) == 1
+    assert len(candidates[0][1]) == DIM  # (content_id, embedding)
