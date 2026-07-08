@@ -24,30 +24,32 @@
 
 ## 아키텍처
 
-```
-            ┌─────────────┐
-            │ APScheduler │  매일 정해진 시각 → run_pipeline을 Redis 큐에 등록 (알람시계)
-            └──────┬──────┘
-                   ▼
-            ┌─────────────┐   collect_feeds → summarize_pending → build_and_send_digest
-            │  Arq Worker │   (async 백그라운드 실행, 멱등)
-            └──────┬──────┘
-                   ▼
-  RSS 수집 → contents(DB) → LLM 요약(캐싱) → 키워드 정규화
-                                                │
-                                                ▼
-                              관심도 점수(Jaccard, top-N) → 일일 다이제스트 → Email
-  ┌──────────────┐
-  │  FastAPI App │  관심사 CRUD(/interests) · dead-letter 조회(/dead-letters) · /docs(Swagger=관리자 콘솔)
-  └──────────────┘
+```mermaid
+flowchart TD
+    SCH["⏰ APScheduler<br/>(매일 정해진 시각)"] -->|run_pipeline enqueue| REDIS[("Redis<br/>큐 + 캐시")]
+    REDIS --> WORKER["⚙️ Arq Worker (async, 멱등)"]
 
-  공통: PostgreSQL(+pgvector) · Redis(Arq 큐 + 캐시)
-  LLM: provider 추상화 → fake | anthropic(Claude Haiku) | ollama(로컬, 무료)
-  임베딩: provider 추상화 → fake | ollama(bge-m3) → pgvector 저장
+    WORKER --> COLLECT["collect_feeds<br/>RSS 수집 · content_hash 중복차단"]
+    COLLECT --> SUMM["summarize_pending<br/>LLM 요약 · 캐싱"]
+    SUMM --> EMBED["embed_pending<br/>임베딩 · pgvector"]
+    EMBED --> DIGEST["build_and_send_digest<br/>점수(Jaccard·코사인) → 이메일"]
+
+    COLLECT --> PG[("PostgreSQL<br/>+ pgvector")]
+    SUMM --> PG
+    EMBED --> PG
+    DIGEST --> PG
+
+    API["🌐 FastAPI<br/>/interests · /dead-letters · /docs"] --> PG
+
+    LLMP["LLM provider<br/>fake · anthropic · ollama"] -.요약.-> SUMM
+    EMBP["임베딩 provider<br/>fake · ollama(bge-m3)"] -.임베딩.-> EMBED
+    MAIL["EmailSender<br/>fake · (SES)"] -.발송.-> DIGEST
 ```
 
-데이터 흐름: **수집 → 요약 → (임베딩) → 점수(추천) → 전달** 전 과정 자동화.
-점수 전략은 `SCORING_STRATEGY`로 **Jaccard(토큰 겹침) ↔ 임베딩 코사인(의미)** 교체.
+- **분리 원칙**: API는 즉시 응답, 무거운 일(수집·요약·임베딩·발송)은 워커/스케줄러로 위임.
+- **데이터 흐름**: 수집 → 요약 → (임베딩) → 점수(추천) → 전달 전 과정 자동화.
+- **점수 전략**: `SCORING_STRATEGY`로 Jaccard(토큰 겹침) ↔ 임베딩 코사인(의미) 교체.
+- **provider 추상화**: LLM·임베딩·이메일 모두 인터페이스 뒤에 → 설정으로 교체.
 
 ---
 
