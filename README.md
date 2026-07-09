@@ -160,5 +160,10 @@ Python 3.12 · FastAPI · Arq · APScheduler · PostgreSQL · Redis · SQLAlchem
 ## 문서
 
 - [docs/DESIGN.md](docs/DESIGN.md) — 기술 결정·메커니즘·성공 기준 (SSOT)
-- [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md) — 기획
-- [docs/OLLAMA.md](docs/OLLAMA.md) — 로컬 LLM(Ollama) 설정
+- [docs/PORTFOLIO.md](docs/PORTFOLIO.md) — 포트폴리오 정리본 · [docs/ONE_PAGER.md](docs/ONE_PAGER.md) — 1페이지 요약
+- [docs/INTERVIEW.md](docs/INTERVIEW.md) — 예상 면접 질문 & 답변 포인트
+- [docs/samples/](docs/samples/) — 산출물 예시(렌더된 다이제스트 이메일)
+- [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md) — 기획 · [docs/OLLAMA.md](docs/OLLAMA.md) — 로컬 LLM(Ollama) 설정
+
+## 라이선스
+MIT — [LICENSE](LICENSE)
