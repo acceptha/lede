@@ -2,6 +2,8 @@
 
 > 생성: office-hours 세션 (2026-06-11)
 > 개정: v1.1 (2026-06-12) — 다이제스트 스키마 모순 해소, 점수 적용 정책 확정, 성공 기준 보강
+> 개정: v1.2 (2026-07) — 소스 3곳 채택(§11), 임베딩 점수 전략(V3 일부) 반영(§5·§10)
+> 개정: v1.3 (2026-10-20) — 구현 현행화: `dead_letters`·`summaries.embedding` 스키마 추가(§5), 성공 기준 달성 표시(§9), 이메일 발송은 Fake만 구현임을 명시(§4·§7·§8), 미해결 질문 정리(§11)
 > 상태: APPROVED
 > 모드: Builder (백엔드 포트폴리오)
 > 참조 기획서: [PROJECT_PLAN.md](./PROJECT_PLAN.md)
@@ -96,7 +98,7 @@ Redis                    작업 대기열 + 캐시                         ← �
                                   관심도 점수 계산(키워드 겹침)
                                                 │
                                                 ▼
-                                  일일 다이제스트 → Email(AWS SES)
+                                  일일 다이제스트 → Email(EmailSender — 현재 Fake, SES는 미구현 §8)
 
   ┌──────────────┐
   │  FastAPI App │  사용자/관심사 CRUD + 다이제스트 조회 + /docs(Swagger)
@@ -118,11 +120,12 @@ Redis                    작업 대기열 + 캐시                         ← �
 | `users` | id, email, nickname, created_at | MVP는 seed 1명. 비밀번호/인증은 V2 |
 | `sources` | id, source_name, source_url, source_type | RSS URL 등록 |
 | `contents` | id, source_id, title, content, original_url, published_at, **content_hash** | `content_hash`로 중복 차단 + 요약 캐시 키 |
-| `summaries` | id, content_id, summary, keywords, reading_time | 본문 해시 기준 캐싱 → 같은 글 재요약 금지. **keywords는 JSONB 배열**(정규화된 canonical 태그, 필요 시 GIN 인덱스) |
+| `summaries` | id, content_id, summary, keywords, reading_time, **embedding** | 본문 해시 기준 캐싱 → 같은 글 재요약 금지. **keywords는 JSONB 배열**(정규화된 canonical 태그, 필요 시 GIN 인덱스). **embedding은 `vector(1024)`**(bge-m3 기준, V3) — NULL이면 `embed_pending` 대상. 모델 교체로 차원이 바뀌면 마이그레이션 필요 |
 | `user_interests` | id, user_id, keyword | 점수 계산 입력. **등록 시 키워드 정규화 함수 적용** (아래 적용 정책 참고) |
 | `user_events` | id, user_id, content_id, event_type(view/click/save), created_at | V4 추천 엔진용 데이터 적재 (MVP는 쌓기만) |
 | `digests` | id, user_id, **digest_date**, status, sent_at | 하루 한 통 발송 단위. **(user_id, digest_date) UNIQUE = 발송 idempotency의 실체** |
 | `digest_items` | id, digest_id, content_id, **score** | 그날 다이제스트에 담긴 글 + 선정 당시 점수 스냅샷 → 점수 함수 품질 회고·V3/V4 개선의 측정 데이터 |
+| `dead_letters` | id, job_type, content_id, error, **attempts**, created_at, updated_at | 실패 처리의 실체(아래 "실패 처리"). **(job_type, content_id) UNIQUE** → 대상당 1행 upsert, attempts 누적. `attempts >= DEADLETTER_MAX_ATTEMPTS`(기본 3)이면 재처리 대상에서 제외(park) |
 
 > **v1.1 변경:** 기존 `notifications(id, user_id, content_id, send_type, status)`를 `digests` + `digest_items`로 교체.
 > 이전 스키마는 건별 발송 모델이라 (1) 문서가 약속한 (user, digest-date) 유니크 제약을 걸 컬럼이 없었고,
@@ -139,8 +142,8 @@ Redis                    작업 대기열 + 캐시                         ← �
 ### 실패 처리 (확정 — 신규)
 - **재시도/백오프:** LLM·SES·RSS 호출은 Arq의 재시도 + 지수 백오프
   - **LLM 요약 경로엔 full jitter 적용** — 새 글 다수를 병렬로 요약하다 공유 rate limit(429)에 걸리면 작업들이 동시에 실패→동시에 재시도하며 thundering herd가 발생한다. 대기 시간을 `random(0, base × 2**attempt)`로 무작위화(full jitter)해 재시도 파도를 흩뿌린다. (Arq `Retry(defer=...)`에 이 값을 실어 보냄)
-  - **RSS·SES엔 jitter 미적용 (의도된 생략)** — RSS는 피드마다 호스트가 달라 한 대상에 몰리지 않고, SES는 하루 1통(단일 유저)이라 herd가 없다. 불필요한 무작위화를 피하는 분별이지 누락이 아니다. → 두 경로는 결정론적 지수 백오프 그대로.
-- **dead-letter:** N회 실패한 작업은 실패 상태로 기록(`summaries`/작업 결과)하고 파이프라인은 계속 진행 (한 건 실패가 전체를 막지 않음)
+  - **RSS·이메일 발송엔 jitter 미적용 (의도된 생략)** — RSS는 피드마다 호스트가 달라 한 대상에 몰리지 않고, 발송은 하루 1통(단일 유저)이라 herd가 없다. 불필요한 무작위화를 피하는 분별이지 누락이 아니다. → 두 경로는 결정론적 지수 백오프 그대로. (발송 경로의 백오프는 `EmailError` 기준으로 구현돼 있고, 실제 sender는 현재 Fake — SES 연결 시 그대로 적용된다.)
+- **dead-letter:** N회 실패한 작업은 `dead_letters` 테이블에 기록하고 파이프라인은 계속 진행 (한 건 실패가 전체를 막지 않음)
 - **idempotency:** 파이프라인 재실행해도 (1) 요약은 `content_hash`로, (2) 발송은 `digests`의 (user_id, digest_date) 유니크 제약으로 중복 방지
 
 ### 관심도 점수 함수 (확정 — 키워드 겹침)
@@ -164,6 +167,8 @@ IR 교과서가 정확히 이 한계를 지적하며 tf-idf·코사인 유사도
 `lede`에서 그 방향(가중 벡터·임베딩)은 **V3(벡터 검색)**이다. MVP는 키워드 겹침까지.
 
 > **실측(2026-07, V3 착수)**: 임베딩 코사인(bge-m3, 로컬)이 Jaccard가 0으로 놓치는 의미 동의어를 잡음 — `AI↔인공지능` 0.828, `주식↔증시` 0.757 (Jaccard 0.0), 무관 `AI↔떡볶이` 0.452. 알려진 표기 변형은 정규화, 의미 동의어는 임베딩이 담당(상보). 코드: `app/embedding/`, `app/scoring/cosine.py`.
+>
+> **알려진 한계 — 임베딩 전략엔 하한선이 없다:** Jaccard 전략은 `score > 0`이 "전혀 안 겹치면 제외"를 보장하지만, 코사인은 무관한 쌍도 0보다 큰 값을 준다(`AI↔떡볶이` 0.452). 현재 `rank_by_cosine`은 하한선 없이 상위 N건을 고르므로, 후보가 적은 날엔 무관한 글이 다이제스트에 들어갈 수 있다. 하한선 값은 측정 없이 정하지 않는다(§5 "측정 후에만 승급") — 코사인 threshold 튜닝은 §10 V3 확장 항목. 선정 경로는 파이썬 계산(`rank_by_cosine`)이며, pgvector `<=>` 질의는 `EmbeddingRepository.find_similar`에 구현·통합 테스트돼 있으나 파이프라인에선 아직 쓰지 않는다(V3 유사 콘텐츠 추천용).
 
 #### 적용 정책 (확정 — v1.1 신규)
 
@@ -217,7 +222,7 @@ IR 교과서가 정확히 이 한계를 지적하며 tf-idf·코사인 유사도
 1. RSS 피드 **하나** 수집
 2. DB에 원문 저장 (`content_hash` 포함)
 3. LLM으로 3줄 요약 1건 생성 (추상화 레이어 통해)
-4. 결과를 **내 이메일로** 발송 (SES)
+4. 결과를 **내 이메일로** 발송 (`EmailSender` 추상화 — 현재 구현은 Fake, SES는 §8)
 - 동시에: docker-compose 뼈대(app+worker+postgres+redis), pytest 첫 통과
 
 ### MVP (약 2~4주)
@@ -239,6 +244,8 @@ IR 교과서가 정확히 이 한계를 지적하며 tf-idf·코사인 유사도
 - 라이브 URL이 필요해지면 → 배치 성격에 맞는 **Lambda + EventBridge(cron)** 를 후속 마일스톤으로 (비용 거의 0). MVP 범위 아님.
 
 ### 이메일 발송 주의 (SES)
+- **현황(2026-10): SES sender는 미구현.** `app/email/senders/`에는 `FakeEmailSender`만 있고, `EMAIL_PROVIDER`가 `fake` 외 값이면 `app/email/factory.py`가 `ValueError`를 던진다. 렌더링 결과는 `docs/samples/`로 확인.
+- 알려진 구멍: `sender.send()` 성공과 `mark_sent` 커밋 사이에 프로세스가 죽으면 재발송된다(at-least-once). sender가 Fake인 지금은 실제 피해가 없고, SES를 붙일 때 다룬다.
 - SES는 초기 **샌드박스 모드** — 인증된 주소로만 발송 가능. MVP("내 메일")엔 무관.
 - 멀티유저(V2) 전환 시 SES 프로덕션 액세스 승인 필요 → 알려진 게이트로 기록.
 
@@ -246,13 +253,15 @@ IR 교과서가 정확히 이 한계를 지적하며 tf-idf·코사인 유사도
 
 ## 9. 성공 기준
 
-- [ ] `docker-compose up` 한 줄로 전체 스택 기동
-- [ ] RSS 다중 소스 → 요약 → 일일 다이제스트 이메일이 스케줄대로 자동 발송
-- [ ] 같은 콘텐츠 재실행 시 재요약 0회, 중복 발송 0회 (idempotency 검증)
-- [ ] 관심사와 키워드가 전혀 겹치지 않는 콘텐츠는 다이제스트에 미포함 (점수 함수 단위 테스트, 정규화 케이스 — 대소문자·한/영 별칭 — 포함)
-- [ ] LLM 호출 실패가 전체 파이프라인을 멈추지 않음 (재시도 후 dead-letter)
-- [ ] pytest가 가짜 LLM provider로 비용 0원에 파이프라인 통과
-- [ ] LLM 비용을 측정된 숫자로 README에 제시 (캐싱 전/후 비교)
+> 현황 기준일: 2026-10-20
+
+- [x] `docker compose up` 한 줄로 전체 스택 기동 (worker가 마이그레이션·seed·스케줄러까지 자동)
+- [ ] RSS 다중 소스 → 요약 → 일일 다이제스트 이메일이 스케줄대로 자동 발송 — **부분 달성**: 다중 소스 수집·요약·다이제스트 빌드는 스케줄로 자동 실행. **실제 메일 발송은 미달성**(sender가 Fake, §8)
+- [x] 같은 콘텐츠 재실행 시 재요약 0회, 중복 발송 0회 (실 Postgres 통합 테스트로 검증)
+- [x] 관심사와 키워드가 전혀 겹치지 않는 콘텐츠는 다이제스트에 미포함 — **`SCORING_STRATEGY=jaccard`(기본) 기준.** `embedding` 전략은 하한선이 없어 미보장(§5 "알려진 한계")
+- [x] LLM 호출 실패가 전체 파이프라인을 멈추지 않음 (실패 격리 + `dead_letters` retry-then-park)
+- [x] pytest가 가짜 LLM provider로 비용 0원에 파이프라인 통과
+- [x] LLM 비용을 측정된 숫자로 README에 제시 (캐싱 전/후 비교 — 로컬 EXAONE 3.5 기준 토큰·시간)
 
 ---
 
@@ -261,7 +270,7 @@ IR 교과서가 정확히 이 한계를 지적하며 tf-idf·코사인 유사도
 | 버전 | 내용 |
 |------|------|
 | V2 | 가입/로그인/JWT 인증, 멀티유저, Slack/Discord/Telegram 연동, SES 프로덕션 |
-| V3 (일부 구현) | **임베딩 provider(ollama bge-m3) + pgvector 저장 + 점수 전략 스위치(jaccard↔embedding) 완료.** 유사 콘텐츠 추천·재랭킹·코사인 threshold 튜닝(관찰 트리거)은 확장 여지 |
+| V3 (일부 구현) | **임베딩 provider(ollama bge-m3) + pgvector 저장 + 점수 전략 스위치(jaccard↔embedding) 완료.** 유사 콘텐츠 추천·재랭킹·코사인 threshold 튜닝(관찰 트리거)·Jaccard+임베딩 하이브리드는 확장 여지 |
 | V4 | `user_events` 기반 개인화 추천 엔진, AI 에이전트 큐레이션 |
 | V5 | SaaS 공개, 유료 구독 모델 검토 |
 
@@ -269,7 +278,7 @@ IR 교과서가 정확히 이 한계를 지적하며 tf-idf·코사인 유사도
 
 ## 11. 미해결 질문
 
-- LLM 공급자 1순위? (비용·한국어 요약 품질 고려 — 측정 후 결정)
+- ~~LLM 공급자 1순위?~~ → **잠정 해소(2026-06): 로컬 Ollama(EXAONE 3.5 2.4b).** 1순위였던 Anthropic(Claude Haiku)은 결제 불가로 실측하지 못함 — 코드 경로는 유지. Anthropic 대비 한국어 요약 품질 비교는 미측정. 근거: [OLLAMA.md](./OLLAMA.md)
 - 다이제스트 발송 시각 (매일 1회·top-5는 확정, 시각과 사용자 설정은 V2)
 - ~~RSS 첫 소스 후보~~ → **해소(2026-06): 어피티 채택.** 아래 소스 조사 결과 참고.
 - 통제 어휘(canonical 태그) 초안 확보 방법 — 수동 시드 목록 vs 첫 수집분 키워드에서 추출 후 정리
@@ -289,7 +298,7 @@ IR 교과서가 정확히 이 한계를 지적하며 tf-idf·코사인 유사도
 | 뉴닉 (newneek.co) | ❌ | — | 보류 | 동일 — 공개 RSS 없음 |
 
 **기준:** 요약 파이프라인은 **본문 전문**이 있어야 의미가 있다. RSS가 있어도 본문이 없거나(너겟) 발췌만(카카오) 있으면 채택하지 않는다.
-경제 뉴스레터는 대부분 full-text RSS 미제공 → 멀티소스는 본문 전문이 안정적인 기술 블로그(우아한형제들·토스)로 확장. 보류 소스의 본문 보강은 크롤링이 필요 → **스코프 밖**(§3-6 RSS만, 크롤링 금지).
+경제 뉴스레터는 대부분 full-text RSS 미제공 → 멀티소스는 본문 전문이 안정적인 기술 블로그(토스·네이버 D2)로 확장. 우아한형제들은 full-text지만 Cloudflare 차단으로 보류. 보류 소스의 본문 보강은 크롤링이 필요 → **스코프 밖**(§3-6 RSS만, 크롤링 금지).
 
 ---
 
