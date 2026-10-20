@@ -10,9 +10,10 @@ RSS 수집 → LLM 요약 → 관심사 점수 필터 → 일일 다이제스트
 
 ## 현재 단계
 
-**0단계 — 수직 슬라이스** (DESIGN.md §7)
-RSS 피드 1개 → DB 저장(content_hash 포함) → LLM 요약 1건 → 내 이메일로 발송.
-이 한 줄기를 끝까지 관통하는 것이 목표. 이 단계에서 다중 소스, 점수 함수, 사용자 API는 만들지 않는다.
+**MVP 완료 + V3 일부 구현** (DESIGN.md §7·§9·§10)
+- 완료: RSS 다중 소스(3곳) · LLM 요약(캐싱) · 관심사 API + Jaccard top-N · 일일 다이제스트(idempotent) · 재시도/dead-letter · 스케줄러 · CI
+- V3 일부: 임베딩 provider(ollama bge-m3) + pgvector 저장 + 점수 전략 스위치(`SCORING_STRATEGY=jaccard|embedding`)
+- 미완: **SES 실발송**(sender는 Fake만 — DESIGN §8), mypy(docs/TODO_MYPY.md), 수집 fan-out(docs/TODO_FANOUT.md)
 
 <!-- 단계 전환 시 이 섹션만 갱신: 0단계 → MVP → V2... -->
 
@@ -27,8 +28,8 @@ RSS 피드 1개 → DB 저장(content_hash 포함) → LLM 요약 1건 → 내 �
 ## 명령어
 
 ```bash
-docker-compose up                 # 전체 스택 기동 (성공 기준: 이 한 줄로 재현)
-docker-compose up -d postgres redis   # 로컬 개발 시 인프라만
+docker compose up -d --build      # 전체 스택 기동 (성공 기준: 이 한 줄로 재현)
+docker compose up -d postgres redis   # 로컬 개발 시 인프라만
 pytest                            # 전체 테스트 (LLM 실호출 0회여야 함)
 pytest -x -q tests/test_pipeline.py   # 파이프라인 빠른 검증
 alembic upgrade head              # DB 마이그레이션 적용
@@ -36,15 +37,13 @@ alembic revision --autogenerate -m "msg"  # 마이그레이션 생성
 ruff check . && ruff format .     # 린트 + 포맷
 ```
 
-<!-- 실제 파일 구조가 잡히면 명령어를 현행화할 것 -->
-
 ## 절대 규칙
 
-1. **LLM 추상화**: LLM SDK(openai, anthropic 등)는 `app/llm/providers/` 안에서만 import한다. 파이프라인 코드는 provider 인터페이스만 안다. 테스트는 항상 FakeProvider를 주입한다 — pytest 실행 중 실제 LLM 호출이 1회라도 발생하면 버그다.
+1. **LLM 추상화**: LLM·임베딩 SDK(openai, anthropic 등)와 외부 API 호출은 `app/llm/providers/`·`app/embedding/providers/`·`app/email/senders/` 안에만 둔다. 파이프라인 코드는 provider 인터페이스만 안다. 테스트는 항상 FakeProvider를 주입한다 — pytest 실행 중 실제 LLM 호출이 1회라도 발생하면 버그다.
 2. **Idempotency**: 파이프라인은 언제든 재실행 가능해야 한다. 요약은 `content_hash`로 캐싱(같은 글 재요약 0회), 발송은 `digests(user_id, digest_date)` UNIQUE 제약으로 중복 방지. 새 작업을 추가할 때마다 "두 번 실행하면?"을 자문하라.
 3. **비용**: 예상 읽기 시간은 LLM에 묻지 않는다 — 글자 수 ÷ 분당 속도로 계산. 요약은 저비용 모델로 시작, 측정 없이 상위 모델로 승급 금지. LLM 출력은 구조화(JSON)로 받는다.
 4. **async 일관성**: API와 워커 모두 async. 파이프라인에 sync 블로킹 I/O를 넣지 않는다 (DB는 async 드라이버, HTTP는 httpx async).
-5. **실패 격리**: 한 콘텐츠의 요약 실패가 파이프라인 전체를 멈추면 안 된다. N회 재시도 후 dead-letter 기록하고 계속 진행. LLM 호출 재시도에만 full jitter 적용, RSS·SES는 결정론적 백오프 (DESIGN.md §5 — 의도된 구분).
+5. **실패 격리**: 한 콘텐츠의 요약 실패가 파이프라인 전체를 멈추면 안 된다. N회 재시도 후 dead-letter 기록하고 계속 진행. LLM 호출 재시도에만 full jitter 적용, RSS·이메일 발송은 결정론적 백오프 (DESIGN.md §5 — 의도된 구분).
 6. **키워드 정규화**: LLM 키워드 출력과 `user_interests` 등록에 동일한 정규화 함수(소문자화 + 별칭 매핑)를 적용한다. 한쪽만 정규화하면 점수 함수가 망가진다.
 
 ## 스코프 가드 (하지 말 것)
@@ -52,7 +51,7 @@ ruff check . && ruff format .     # 린트 + 포맷
 - 크롤링/스크래핑 코드 작성 금지 — MVP는 **RSS만** (ToS 리스크, DESIGN.md §3-6)
 - 가입/로그인/JWT 구현 금지 — MVP는 seed 유저 1명, 인증은 V2
 - 관리자 프론트엔드 금지 — FastAPI 자동 Swagger UI(`/docs`)가 관리자 콘솔
-- 벡터 검색/임베딩/행동 기반 추천 금지 — V3/V4. MVP 점수 함수는 **Jaccard + top-N(기본 5) + published_at 동점 처리** 하나로 못 박음
+- 행동 기반 추천 금지 — V4. 기본 점수 함수는 **Jaccard + top-N(기본 5) + published_at 동점 처리**. 임베딩 전략은 V3 범위(스위치·저장)까지만 구현됨 — 유사 콘텐츠 추천·재랭킹·코사인 threshold는 측정 없이 추가하지 않는다
 - AWS 상시 배포 코드 작성 금지 — docker-compose 재현이 산출물
 - `user_events`는 적재만 한다. MVP에서 읽어서 추천에 쓰지 않는다.
 
