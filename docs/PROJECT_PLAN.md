@@ -7,6 +7,11 @@
 - **레포명 후보**: `sift` · `lede` · `skim` (확정 후 교체)
 - **문서 성격**: 백엔드 포트폴리오용 프로젝트 기획서
 
+> **⚠️ 기획 원본(2026-06) — 보존용.** 이후 확정된 결정은 [DESIGN.md](./DESIGN.md)가 우선한다(SSOT). 이 문서와 달라진 주요 항목:
+> 레포명 `lede` 확정 · 스택 FastAPI + Arq + APScheduler 확정(Flask·Celery·RQ·Celery Beat 기각, DESIGN §2) ·
+> 크롤링 없이 **RSS만**(DESIGN §3-6) · 관리자 페이지 대신 Swagger UI(§3-3) ·
+> `notifications` 테이블 → `digests` + `digest_items`로 교체, `dead_letters` 추가(DESIGN §5)
+
 ---
 
 ## 1. 프로젝트 개요
