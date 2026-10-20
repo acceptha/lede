@@ -41,7 +41,7 @@
 
 **Q9. 재시도 백오프를 경로별로 다르게 한 이유는? (핵심)**
 - **LLM = full jitter**: 새 글 여러 개를 병렬 요약하다 공유 rate limit(429)에 걸리면 작업들이 동시에 실패→동시에 재시도하는 thundering herd 발생. 대기를 `random(0, base·2^n)`로 무작위화해 재시도 파도를 분산.
-- **RSS·SES = 결정론적 백오프**: RSS는 호스트가 달라 한 대상에 안 몰리고, SES는 하루 1통이라 herd 없음 → 무작위화 불필요. (DESIGN §5, `app/retry.py`)
+- **RSS·이메일 발송 = 결정론적 백오프**: RSS는 호스트가 달라 한 대상에 안 몰리고, 발송은 하루 1통이라 herd 없음 → 무작위화 불필요. (DESIGN §5, `app/retry.py`) ※ 발송 sender는 현재 Fake — SES 실발송은 미구현이라는 점을 먼저 밝힐 것.
 
 **Q10. 한 콘텐츠 요약이 실패하면 어떻게 되나요?**
 - 실패 격리: 해당 콘텐츠만 dead-letter 기록 후 `continue`, 배치는 계속. 429(공유 한도)만 예외적으로 잡 전체를 jitter로 백오프·재시도.
@@ -86,7 +86,8 @@
 ## F. 벡터 검색 (V3)
 
 **Q20. pgvector를 왜 도입했고 유사도는 어떻게 계산하나요?**
-- 임베딩(bge-m3, 1024차원)을 `summaries.embedding vector(1024)`에 저장, 코사인 거리(`<=>`)로 최근접 검색. 관심사 키워드들을 임베딩해 centroid(평균 벡터)를 만들고 콘텐츠 임베딩과 코사인. (`app/embedding/`, `app/scoring/cosine.py`)
+- 임베딩(bge-m3, 1024차원)을 `summaries.embedding vector(1024)`에 저장. 다이제스트 선정은 관심사 키워드 임베딩의 centroid(평균 벡터)와 콘텐츠 임베딩의 코사인을 **파이썬에서 계산**(`rank_by_cosine`) — 소량이라 DB 질의가 필요 없음. pgvector 코사인 거리(`<=>`) 질의는 `find_similar`로 구현·통합 테스트까지 했지만 파이프라인에선 아직 미사용(유사 콘텐츠 추천용으로 준비). (`app/embedding/`, `app/scoring/cosine.py`)
+- 한계: 코사인엔 하한선이 없어 무관한 글(`AI↔떡볶이` 0.452)도 후보가 적으면 선정될 수 있음 → threshold는 측정 후 결정(DESIGN §5).
 
 **Q21. 임베딩 차원을 하드코딩했는데 모델을 바꾸면?**
 - `vector(1024)`는 bge-m3 기준. 모델 변경 시 차원이 달라져 마이그레이션 필요 — 주석에 명시. (트레이드오프 인지)

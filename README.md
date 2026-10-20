@@ -16,7 +16,7 @@
 | 기둥 | 무엇을 / 어디서 |
 |------|----------------|
 | **비동기 파이프라인 설계** | API(FastAPI) / 워커(Arq) / 스케줄러(APScheduler)를 분리. 전 구간 `async`. `docker compose up` 한 줄로 재현 |
-| **실패 처리** | 재시도 백오프(LLM=full jitter / RSS·SES=결정론적, 의도적 구분), 실패 격리, **dead-letter retry-then-park**, 구조화 JSON 로깅 |
+| **실패 처리** | 재시도 백오프(LLM=full jitter / RSS·발송=결정론적, 의도적 구분), 실패 격리, **dead-letter retry-then-park**, 구조화 JSON 로깅 |
 | **비용 최적화** | LLM 추상화로 공급자 교체, `content_hash` 캐싱(재요약 0회), HTML 제거(토큰 절감), 읽기시간 직접 계산(LLM 미사용), 구조화 출력, 로컬 모델($0) |
 | **idempotency** | 파이프라인 전체 재실행 안전 — `content_hash` UNIQUE(재요약 0), `(user_id, digest_date)` UNIQUE(중복 발송 0) |
 
@@ -78,14 +78,14 @@ docker compose up -d --build  # postgres + redis + app + worker(+scheduler) 일�
 - **LLM 추상화** — SDK는 `app/llm/providers/`에서만 import. 파이프라인은 `LLMProvider` 프로토콜만 안다. 그래서 Anthropic↔Ollama 전환이 **코드 0줄 수정**. 테스트는 항상 `FakeProvider` 주입.
 - **idempotency를 DB 제약으로** — `contents.content_hash` UNIQUE = 요약 캐시 키, `digests(user_id, digest_date)` UNIQUE = 발송 1회. `INSERT ... ON CONFLICT`로 재실행 안전.
 - **점수 함수 = Jaccard** — `score>0` 중 top-N(기본 5), 동점은 `published_at` 최신순. 관심사·키워드는 **동일 정규화 함수**(소문자+별칭)로 같은 공간에. (한계·근거는 DESIGN §5)
-- **실패 처리** — LLM 재시도엔 **full jitter**(thundering herd 방지), RSS·SES엔 **결정론적 백오프**(의도적 구분). 한 건 실패는 격리하고 계속, N회 초과 시 **dead-letter park**.
+- **실패 처리** — LLM 재시도엔 **full jitter**(thundering herd 방지), RSS·이메일 발송엔 **결정론적 백오프**(의도적 구분). 한 건 실패는 격리하고 계속, N회 초과 시 **dead-letter park**.
 - **관측** — Flower 대신 **구조화 JSON 로그 + 작업 결과/dead-letter 테이블**.
 
 ---
 
 ## 측정된 숫자 (비용 최적화 근거)
 
-- **테스트 비용 $0** — `pytest` 40개, `FakeProvider` 주입으로 **실 LLM 호출 0회**.
+- **테스트 비용 $0** — `pytest` 61개(단위 54 + 통합 7), `FakeProvider` 주입으로 **실 LLM 호출 0회**.
 - **로컬 추론 $0** — Ollama(EXAONE 3.5 2.4b) 기사 1건 요약: prompt ~500–3700 tok / 출력 ~60–150 tok / **비용 $0(로컬)**. JSON 로그 예:
   ```json
   {"msg":"llm_usage","provider":"ollama","model":"exaone3.5:2.4b","prompt_tokens":2460,"eval_tokens":116,"cost_usd":0}
@@ -109,6 +109,7 @@ docker compose up -d --build  # postgres + redis + app + worker(+scheduler) 일�
   | AI ↔ 떡볶이 (무관) | 0.000 | 0.452 |
 
   > 알려진 표기 변형(`도커`↔`Docker`)은 정규화(별칭맵)가, 의미 동의어는 임베딩이 잡는다 → 상보적. DESIGN §5의 "Jaccard 한계 → tf-idf/임베딩(V3)"을 실측으로 뒷받침.
+  > 단, 무관한 쌍도 코사인 0.452가 나오듯 임베딩 전략엔 아직 하한선이 없어 "전혀 무관한 글 제외"는 Jaccard(기본값)만 보장한다 — threshold는 측정 후 결정(DESIGN §5 알려진 한계).
 
 ---
 
@@ -147,10 +148,12 @@ Python 3.12 · FastAPI · Arq · APScheduler · PostgreSQL · Redis · SQLAlchem
 
 **구현 완료**: RSS **다중 소스**(어피티·토스·네이버 D2) + content_hash 중복 제거 / LLM 요약(캐싱) / 관심사 등록 + **점수 전략 스위치(Jaccard ↔ 임베딩 코사인)** / 일일 다이제스트(idempotent) / 실패 처리(재시도·dead-letter park) / 스케줄 자동화 / 구조화 JSON 로깅 / **임베딩 저장(pgvector) + embed_pending** / CI(단위+통합) + 통합 테스트.
 
+**미구현**: SES 실발송 — `EmailSender` 추상화와 발송 재시도는 있지만 구현체는 `FakeEmailSender`뿐 (렌더 결과는 [docs/samples/](docs/samples/)). mypy([TODO](docs/TODO_MYPY.md)), 수집 fan-out([TODO](docs/TODO_FANOUT.md)).
+
 | 버전 | 계획 |
 |------|------|
 | V3 (일부 구현) | 임베딩 provider + pgvector + 점수 전략 스위치 **완료** → 유사 콘텐츠 추천·재랭킹·threshold 튜닝은 확장 여지 |
-| V2 | 가입/로그인/JWT, 멀티유저, Slack/Discord 연동, SES 프로덕션 |
+| V2 | 가입/로그인/JWT, 멀티유저, Slack/Discord/Telegram 연동, SES 프로덕션 |
 | V4 | `user_events` 기반 개인화 추천 |
 
 상세: [docs/DESIGN.md](docs/DESIGN.md) §10
@@ -163,7 +166,10 @@ Python 3.12 · FastAPI · Arq · APScheduler · PostgreSQL · Redis · SQLAlchem
 - [docs/PORTFOLIO.md](docs/PORTFOLIO.md) — 포트폴리오 정리본 · [docs/ONE_PAGER.md](docs/ONE_PAGER.md) — 1페이지 요약
 - [docs/INTERVIEW.md](docs/INTERVIEW.md) — 예상 면접 질문 & 답변 포인트
 - [docs/samples/](docs/samples/) — 산출물 예시(렌더된 다이제스트 이메일)
-- [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md) — 기획 · [docs/OLLAMA.md](docs/OLLAMA.md) — 로컬 LLM(Ollama) 설정
+- [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md) — 기획 원본 · [docs/lede_interest_score.md](docs/lede_interest_score.md) — 점수 함수 초안(DESIGN §5로 흡수) · [docs/OLLAMA.md](docs/OLLAMA.md) — 로컬 LLM(Ollama) 설정
+- [docs/PORTFOLIO_STAR_T.md](docs/PORTFOLIO_STAR_T.md) — STAR-T 형식 포트폴리오
+- [docs/TODO_MYPY.md](docs/TODO_MYPY.md) · [docs/TODO_FANOUT.md](docs/TODO_FANOUT.md) — 알고 미룬 작업과 전환 조건
+- [docs/STUDY_CURRICULUM.md](docs/STUDY_CURRICULUM.md) · [docs/STUDY_NOTES.md](docs/STUDY_NOTES.md) · [docs/PRACTICE.md](docs/PRACTICE.md) — 학습 기록
 
 ## 라이선스
 MIT — [LICENSE](LICENSE)

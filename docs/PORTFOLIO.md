@@ -20,7 +20,8 @@
 
 | 항목 | 값 |
 |------|-----|
-| 커밋 | 26개 (기능 단위 conventional commits, 증분 개발) |
+| 커밋 | 기능 단위 conventional commits, 증분 개발 (`git log --oneline`) |
+| 이메일 발송 | 렌더링·발송 idempotency·재시도까지 구현. **실 sender(SES)는 미구현** — 현재 `FakeEmailSender` |
 | 테스트 | **61개** (단위 54 + 통합 7), CI에서 자동 실행 |
 | CI | GitHub Actions 2잡(unit·integration) 녹색 |
 | LLM 비용(테스트) | **$0** — 가짜 provider 주입, 실 호출 0회 |
@@ -42,7 +43,7 @@
 
 ### ③ 경로별로 다른 재시도 전략 (분별)
 - **LLM = full jitter**: 공유 rate limit(429)에 병렬 요약이 동시 재시도하는 thundering herd를 무작위 대기로 분산.
-- **RSS·SES = 결정론적 백오프**: herd가 없어 무작위화 불필요.
+- **RSS·이메일 발송 = 결정론적 백오프**: herd가 없어 무작위화 불필요.
 - 왜 다른지를 코드·문서에 근거로 명시(DESIGN §5).
 
 ### ④ dead-letter "retry-then-park"
@@ -122,7 +123,7 @@
 
 | 버전 | 내용 |
 |------|------|
-| V2 | 가입/로그인/JWT, 멀티유저, Slack/Discord 연동, SES 프로덕션 |
+| V2 | 가입/로그인/JWT, 멀티유저, Slack/Discord/Telegram 연동, SES 프로덕션 |
 | V3 심화 | 유사 콘텐츠 추천, 코사인 threshold 튜닝, Jaccard+임베딩 하이브리드 |
 | V4 | `user_events` 기반 개인화 추천 |
 
